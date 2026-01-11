@@ -1,31 +1,30 @@
+
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
 from scipy.stats import lognorm
 import matplotlib.pyplot as plt
 
-# --- PRE-REQUISITE: DATA & MODEL (Running this again to ensure fresh state) ---
-# 1. Clean Data
-df = pd.read_csv('PM 2.5 Data\\hanoi-air-quality.csv') # Make sure this matches your filename
-df['date'] = pd.to_datetime(df['date'])
-df = df.sort_values('date')
+# IMPORT YOUR NEW MASTER LOADER
+import data 
 
-cols_to_fix = [' pm25', ' pm10', ' o3', ' so2', ' co']
-for col in cols_to_fix:
-    df[col] = pd.to_numeric(df[col], errors='coerce')
+# ==============================================================================
+# 1. GET DATA (One line to rule them all)
+# ==============================================================================
+# This triggers the API update check AND cleans the data
+df_clean = data.get_data()
 
-df['PM2.5_Lag1'] = df[' pm25'].shift(1)
-df_clean = df.dropna()
+# ==============================================================================
+# 2. TRAIN MODEL
+# ==============================================================================
+# Note: No spaces in column names anymore (data.py fixed them)
+X = df_clean[['pm10', 'o3', 'so2', 'co', 'PM2.5_Lag1']]
+Y = df_clean['pm25']
 
-# 2. Train the Model (Step 3.2 of your outline)
-X = df_clean[[' pm10', ' o3', ' so2', ' co', 'PM2.5_Lag1']]
-Y = df_clean[' pm25']
 X = sm.add_constant(X)
 model = sm.OLS(Y, X).fit()
 betas = model.params
 print(model.summary())
-print(betas)
-
 # ==============================================================================
 # SECTION 3.3: SIMULATION PROCESS
 # ==============================================================================
