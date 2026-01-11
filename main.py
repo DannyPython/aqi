@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 # --- PRE-REQUISITE: DATA & MODEL (Running this again to ensure fresh state) ---
 # 1. Clean Data
-df = pd.read_csv('PM 2.5 Data\\hanoi-air-quality.csv') # Make sure this matches your filename
+df = pd.read_csv('PM 2.5 Data\\west,-singapore-air-quality.csv') # Make sure this matches your filename
 df['date'] = pd.to_datetime(df['date'])
 df = df.sort_values('date')
 
