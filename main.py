@@ -27,34 +27,22 @@ except Exception as e:
     print(f"❌ Error loading data from data.py: {e}")
     exit()
 
-# Optional: Seasonal Filtering
+# Seasonal Filter (Optional)
 if FILTER_HAZE_SEASON:
     print("⚠️ FILTER ACTIVE: Using only Haze Season (June-Sept) data.")
     if 'date' in df_clean.columns:
         df_clean['month'] = df_clean['date'].dt.month
         df_clean = df_clean[df_clean['month'].isin([6, 7, 8, 9])]
         print(f"Data filtered to {len(df_clean)} rows.")
-    else:
-        print("⚠️ Warning: 'date' column missing. Skipping seasonal filter.")
 
-# Define Model Variables
-# Standardize names to match data.py output (lowercase)
+# Define Variables
 target_var = 'pm25'
 input_vars = ['pm10', 'o3', 'no2', 'so2', 'co', 'PM2.5_Lag1'] 
 
-# Safety check: Only keep columns that actually exist in the CSV
+# Safety Check
 found_vars = [col for col in input_vars if col in df_clean.columns]
-missing_vars = [col for col in input_vars if col not in df_clean.columns]
-
-if missing_vars:
-    print(f"⚠️ Warning: The following variables were not found in data: {missing_vars}")
-
 if not found_vars:
-    print("❌ Critical Error: No input variables found in dataset. Check column names in CSV.")
-    exit()
-
-if target_var not in df_clean.columns:
-    print(f"❌ Critical Error: Target variable '{target_var}' not found.")
+    print("❌ Critical Error: No input variables found in dataset.")
     exit()
 
 print(f"Using inputs: {found_vars}")
@@ -67,19 +55,17 @@ X = df_clean[found_vars]
 Y = df_clean[target_var]
 X_const = sm.add_constant(X)
 
-# Fit OLS
 try:
     model = sm.OLS(Y, X_const).fit()
     betas = model.params
     resid_std = model.resid.std()
-    print(model.summary())
-    print(f"\nModel Residual Std Dev (Noise): {resid_std:.2f}")
+    print(f"Model Residual Std Dev (Noise): {resid_std:.2f}")
 except Exception as e:
     print(f"❌ Error training OLS model: {e}")
     exit()
 
 # ==============================================================================
-# 3. DISTRIBUTION FITTING (Visual Validation)
+# 3. DISTRIBUTION FITTING (Figure 1)
 # ==============================================================================
 print("\n--- [Phase 2] Fitting Distributions (Visual Check) ---")
 sns.set_theme(style="whitegrid", palette="muted")
@@ -94,14 +80,14 @@ axes_dist = axes_dist.flatten()
 fit_metrics = []
 
 for i, col in enumerate(found_vars):
-    # Handle zeros for Log-Normal (cannot take log of 0)
+    # Handle zeros for Log-Normal
     data_col = df_clean[col].replace(0, 0.001)
     
-    # Fit Log-Normal & Normal
+    # Fit Distributions
     shape, loc, scale = lognorm.fit(data_col, floc=0)
     mu, std = norm.fit(data_col)
     
-    # Calculate KS Error Statistics
+    # Calculate KS Error
     d_stat_log, _ = kstest(data_col, 'lognorm', args=(shape, loc, scale))
     d_stat_norm, _ = kstest(data_col, 'norm', args=(mu, std))
     
@@ -114,11 +100,12 @@ for i, col in enumerate(found_vars):
         ax = axes_dist[i]
         sns.histplot(data_col, stat="density", color="skyblue", alpha=0.5, label="Actual", ax=ax)
         x_range = np.linspace(data_col.min(), data_col.max(), 100)
-        ax.plot(x_range, lognorm.pdf(x_range, shape, loc, scale), 'r-', lw=2, label=f"LogNorm")
-        ax.plot(x_range, norm.pdf(x_range, mu, std), 'g--', lw=2, label=f"Normal")
+        ax.plot(x_range, lognorm.pdf(x_range, shape, loc, scale), 'r-', lw=2, label="LogNorm")
+        ax.plot(x_range, norm.pdf(x_range, mu, std), 'g--', lw=2, label="Normal")
         ax.set_title(f"{col.upper()} Fit")
         ax.legend()
 
+# Clean up empty subplots
 for j in range(i + 1, len(axes_dist)):
     axes_dist[j].axis('off')
 
@@ -129,27 +116,24 @@ print("\n[Distribution Metrics]")
 print(pd.DataFrame(fit_metrics)[['Variable', 'LogNorm D-Stat', 'Improvement %']])
 
 # ==============================================================================
-# 4. MULTIVARIATE STOCHASTIC SIMULATION (Pro Upgrade)
+# 4. MULTIVARIATE SIMULATION (Pro Upgrade)
 # ==============================================================================
 print("\n--- [Phase 3] Correlated Monte Carlo Simulation ---")
 
-# A. Prepare Covariance (Log-Space)
-# 'replace(0, 0.001)' prevents log(0) errors
+# A. Covariance (Log-Space)
 log_data = np.log(df_clean[found_vars].replace(0, 0.001)) 
 mu_log = log_data.mean()
 cov_log = log_data.cov()
 
-# B. Generate Correlated Random Variables (Robust Cholesky)
+# B. Generate Scenarios (Robust)
 print(f"Generating {N_SIMULATIONS} scenarios...")
 try:
-    # 'allow_singular=True' prevents crashes if data variables are highly correlated or constant
     sim_log_inputs = np.random.multivariate_normal(mu_log.values, cov_log.values, N_SIMULATIONS, check_valid='warn', method='eigh')
-except Exception as e:
-    print(f"⚠️ Warning: Matrix singularity issue ({e}). Falling back to 'svd' method.")
-    # Fallback method for tricky matrices
+except:
+    print(f"⚠️ Warning: Matrix singularity. Falling back to SVD.")
     sim_log_inputs = np.random.multivariate_normal(mu_log.values, cov_log.values, N_SIMULATIONS, check_valid='ignore', method='svd')
 
-# C. Convert back to Real Scale
+# C. Convert to Real Scale
 sim_inputs_df = pd.DataFrame(np.exp(sim_log_inputs), columns=found_vars)
 
 # D. Run Regression
@@ -157,15 +141,12 @@ sim_pm25 = np.full(N_SIMULATIONS, betas['const'])
 for col in found_vars:
     sim_pm25 += betas[col] * sim_inputs_df[col].values
 
-# E. Inject Residual Noise
+# E. Inject Noise & Enforce Physics
 noise = np.random.normal(0, resid_std, N_SIMULATIONS)
-sim_pm25 += noise
-
-# F. Enforce Physics
-sim_pm25 = np.maximum(sim_pm25, 0)
+sim_pm25 = np.maximum(sim_pm25 + noise, 0)
 
 # ==============================================================================
-# 5. RESULTS & VISUALIZATION
+# 5. RESULTS & VISUALIZATION (Figure 2 & 3)
 # ==============================================================================
 mean_sim = np.mean(sim_pm25)
 upper_bound = np.percentile(sim_pm25, 95)
@@ -175,7 +156,7 @@ print(f"\n[Forecast Results]")
 print(f"Mean: {mean_sim:.2f} | 95% Worst Case: {upper_bound:.2f}")
 print(f"Risk > 150 (Hazardous): {prob_extreme:.2f}%")
 
-# FIGURE 2: Forecast
+# FIGURE 2: Forecast Histogram
 plt.figure(figsize=(12, 7), num="Figure 2: Forecast Results")
 sns.histplot(sim_pm25, bins=70, kde=True, stat="density", color="teal", alpha=0.4, label="Forecast")
 plt.axvspan(35, 150, color='orange', alpha=0.05, label='Unhealthy')
@@ -183,12 +164,11 @@ plt.axvspan(150, max(sim_pm25.max(), 200), color='red', alpha=0.05, label='Hazar
 plt.axvline(mean_sim, color='blue', linestyle='-', label=f'Mean ({mean_sim:.0f})')
 plt.axvline(upper_bound, color='red', linestyle='--', label=f'95% Worst ({upper_bound:.0f})')
 plt.title("Probabilistic PM2.5 Forecast (Correlated)", fontsize=16, weight='bold')
-plt.xlabel("PM2.5 Concentration")
 plt.legend()
 plt.tight_layout()
 plt.subplots_adjust(top=0.93)
 
-# FIGURE 3: Sensitivity
+# FIGURE 3: Sensitivity Tornado
 print("\n--- [Phase 4] Sensitivity Analysis ---")
 correlations = {}
 for col in found_vars:
