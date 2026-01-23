@@ -98,11 +98,14 @@ def get_weighted_stats(df, w):
     return avg, cov
 
 mu_log, cov_log = get_weighted_stats(log_data_train, weights)
-cov_log.values[np.diag_indices_from(cov_log)] += 1e-4 # Stability Jitter
+
+# FIX: Remove '.values'
+cov_log[np.diag_indices_from(cov_log)] += 1e-4 
 
 # B. Generate 10,000 Potential "2024s"
 rng = np.random.default_rng(42)
-sim_log_inputs = rng.multivariate_normal(mu_log.values, cov_log.values, size=N_SIMULATIONS, method='svd')
+# FIX: Remove '.values'
+sim_log_inputs = rng.multivariate_normal(mu_log, cov_log, size=N_SIMULATIONS, method='svd')
 
 # C. Calculate PM2.5
 sim_inputs_df = pd.DataFrame(np.exp(sim_log_inputs), columns=found_vars)
