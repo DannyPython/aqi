@@ -36,6 +36,22 @@ if FILTER_HAZE_SEASON:
     if 'date' in df_clean.columns:
         df_clean['month'] = df_clean['date'].dt.month
         df_clean = df_clean[df_clean['month'].isin([6, 7, 8, 9])]
+# 1. Sort Data by Date (Crucial for time decay)
+df_clean = df_clean.sort_values('date')
+
+# 2. Moderate Time Decay (0.6 -> 1.0)
+# Old data keeps 60% of its voting power.
+weights = np.linspace(0.6, 1.0, len(df_clean)) 
+
+# 3. Anomaly Penalty (Punish Covid & Extreme Haze)
+if 'date' in df_clean.columns:
+    years = df_clean['date'].dt.year.values
+    for i, year in enumerate(years):
+        if year in [2020, 2021]: 
+            weights[i] *= 0.5  # Penalize Covid years
+        elif year == 2015:
+            weights[i] *= 0.6  # Penalize 2015 Haze
+    print("✅ Weights applied: Moderate Time Decay + Anomaly Penalties.")
 
 # Define Variables
 target_var = 'pm25'
@@ -57,7 +73,7 @@ Y = df_clean[target_var]
 X_const = sm.add_constant(X)
 
 try:
-    model = sm.OLS(Y, X_const).fit()
+    model = sm.WLS(Y, X_const, weights=weights).fit()
     betas = model.params
     resid_std = model.resid.std()
     print(f"Model Residual Std Dev (Noise): {resid_std:.2f}")
@@ -120,8 +136,14 @@ try:
     raw_data_jittered = df_clean[found_vars].replace(0, 0.001) + np.random.normal(0, 0.0001, (len(df_clean), len(found_vars)))
     log_data = np.log(np.maximum(raw_data_jittered, 0.001)) 
     
-    mu_log = log_data.mean()
-    cov_log = log_data.cov()
+    def get_weighted_stats(df, w):
+    val = df.values
+    avg = np.average(val, axis=0, weights=w)
+    diff = val - avg
+    cov = (w[:, None] * diff).T @ diff / np.sum(w)
+    return avg, cov
+
+mu_log, cov_log = get_weighted_stats(log_data, weights)
 
     # Manual Regularization (Safety for Matrix Math)
     cov_log.values[np.diag_indices_from(cov_log)] += 1e-4
