@@ -145,12 +145,14 @@ try:
 
 mu_log, cov_log = get_weighted_stats(log_data, weights)
 
-    # Manual Regularization (Safety for Matrix Math)
-    cov_log.values[np.diag_indices_from(cov_log)] += 1e-4
+    # FIX: Remove '.values' (cov_log is already an array)
+    cov_log[np.diag_indices_from(cov_log)] += 1e-4
 
     print(f"Generating {N_SIMULATIONS} scenarios...")
-    # Standard generator with Seed set at top
-    sim_log_inputs = np.random.multivariate_normal(mu_log.values, cov_log.values, N_SIMULATIONS, check_valid='warn')
+    
+    # FIX: Remove '.values' and use the modern 'rng' generator for stability
+    rng = np.random.default_rng(42)
+    sim_log_inputs = rng.multivariate_normal(mu_log, cov_log, size=N_SIMULATIONS, method='svd')
 
     # Convert & Regress
     sim_inputs_df = pd.DataFrame(np.exp(sim_log_inputs), columns=found_vars)
