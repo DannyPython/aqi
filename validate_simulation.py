@@ -41,18 +41,7 @@ df_all['date'] = pd.to_datetime(df_all['date'])
 # Test  = Reality (2024)
 train_df = df_all[df_all['date'].dt.year < SPLIT_YEAR].copy()
 test_df  = df_all[df_all['date'].dt.year == SPLIT_YEAR].copy()
-# 1. Sort Training Data
-train_df = train_df.sort_values('date')
-# 2. Moderate Time Decay (0.6 -> 1.0)
-weights = np.linspace(0.6, 1.0, len(train_df))
-# 3. Anomaly Penalty
-train_years = train_df['date'].dt.year.values
-for i, year in enumerate(train_years):
-    if year in [2020, 2021]: 
-        weights[i] *= 0.5
-    elif year == 2015:
-        weights[i] *= 0.6
-print("✅ Weights applied to Training Data.")
+
 print(f"Training Data (Pre-{SPLIT_YEAR}): {len(train_df)} days")
 print(f"Testing Data (Real {SPLIT_YEAR}):   {len(test_df)} days")
 
@@ -75,7 +64,7 @@ Y_train = train_df[target_var]
 X_const = sm.add_constant(X_train)
 
 # Fit OLS
-model = sm.WLS(Y_train, X_const, weights=weights).fit()
+model = sm.OLS(Y_train, X_const).fit()
 betas = model.params
 resid_std = model.resid.std()
 print(f"Model Trained. Residual Noise (Sigma): {resid_std:.2f}")
@@ -90,22 +79,13 @@ print(f"\n--- [Phase 3] Simulating {SPLIT_YEAR} Scenarios ---")
 raw_train_jitter = train_df[found_vars].replace(0, 0.001) + np.random.normal(0, 0.0001, (len(train_df), len(found_vars)))
 log_data_train = np.log(np.maximum(raw_train_jitter, 0.001))
 
-def get_weighted_stats(df, w):
-    val = df.values
-    avg = np.average(val, axis=0, weights=w)
-    diff = val - avg
-    cov = (w[:, None] * diff).T @ diff / np.sum(w)
-    return avg, cov
-
-mu_log, cov_log = get_weighted_stats(log_data_train, weights)
-
-# FIX: Remove '.values'
-cov_log[np.diag_indices_from(cov_log)] += 1e-4 
+mu_log = log_data_train.mean()
+cov_log = log_data_train.cov()
+cov_log.values[np.diag_indices_from(cov_log)] += 1e-4 # Stability Jitter
 
 # B. Generate 10,000 Potential "2024s"
 rng = np.random.default_rng(42)
-# FIX: Remove '.values'
-sim_log_inputs = rng.multivariate_normal(mu_log, cov_log, size=N_SIMULATIONS, method='svd')
+sim_log_inputs = rng.multivariate_normal(mu_log.values, cov_log.values, size=N_SIMULATIONS, method='svd')
 
 # C. Calculate PM2.5
 sim_inputs_df = pd.DataFrame(np.exp(sim_log_inputs), columns=found_vars)
