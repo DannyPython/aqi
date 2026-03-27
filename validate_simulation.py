@@ -15,7 +15,7 @@ except ImportError:
 # CONFIGURATION
 # ==============================================================================
 # We want to see if the model could have predicted 2024 using only past data.
-SPLIT_YEAR = 2024
+SPLIT_YEAR = 2018
 N_SIMULATIONS = 10000
 np.random.seed(42) # Freeze randomness so results are consistent
 

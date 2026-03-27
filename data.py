@@ -6,7 +6,7 @@ import os
 # 1. CONFIGURATION
 # ==========================================
 API_TOKEN = "c95bd6ad019cee15267a1a4dda6c9e322792598a"
-CURRENT_FILE_PATH = 'PM 2.5 Data/west,-singapore-air-quality.csv'
+CURRENT_FILE_PATH = 'PM 2.5 Data/central,-singapore-air-quality.csv'
 
 LOCATIONS = {
     'PM 2.5 Data/hanoi-air-quality.csv': 'hanoi',
@@ -96,7 +96,8 @@ def _fetch_and_update(csv_path):
             df.columns = df.columns.str.strip() # Clean column names
             
             # Avoid duplicates using standardized date formats
-            existing_dates = pd.to_datetime(df['date']).dt.strftime('%Y/%m/%d')
+            # NEW
+            existing_dates = pd.to_datetime(df['date'], format='mixed', dayfirst=True).dt.strftime('%d/%m/%Y')
             target_date = pd.to_datetime(formatted_date).strftime('%Y/%m/%d')
             
             if target_date in existing_dates.values:
@@ -132,7 +133,8 @@ def get_data(file_path=CURRENT_FILE_PATH, auto_update_all=True):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    df['date'] = pd.to_datetime(df['date'])
+    
+    df['date'] = pd.to_datetime(df['date'], format='mixed', dayfirst=True)
     df = df.sort_values('date').dropna(subset=['pm25'])
     
     # Cleaning
